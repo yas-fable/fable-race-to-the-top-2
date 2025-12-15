@@ -47,10 +47,12 @@
             justify-content: center;
             align-items: center;
             text-align: center;
+            transition: opacity 0.3s;
         }
 
         .hidden {
-            display: none !important;
+            opacity: 0;
+            pointer-events: none;
         }
 
         h1 {
@@ -136,6 +138,7 @@
             font-weight: 800;
             font-size: 20px;
             z-index: 10;
+            text-shadow: 2px 2px 0px #FFF;
         }
         
         #mobile-controls {
@@ -163,6 +166,21 @@
             background: rgba(255, 175, 0, 0.8);
         }
 
+        /* Win Text Animation */
+        @keyframes popIn {
+            0% { transform: scale(0); }
+            80% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        
+        .win-text {
+            font-size: 40px;
+            color: #E15588; /* Fuchsia Pink */
+            text-shadow: 3px 3px 0 #FFF;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            margin-bottom: 20px;
+        }
+
     </style>
 </head>
 <body>
@@ -176,7 +194,7 @@
         <h1>Fable Studios</h1>
         <h2>Race to the Top</h2>
         <div style="margin-bottom: 20px; font-size: 14px; max-width: 280px;">
-            Reach the Clapperboard!<br>Collect leaves for bonus points.
+            Reach the Clapperboard!<br>Collect leaves & keyframes.
         </div>
         <button class="btn" onclick="game.toCharacterSelect()">Start Game</button>
     </div>
@@ -238,8 +256,7 @@ const COLORS = {
 };
 
 /**
- * Pixel Art Data (8x8 grids represented as arrays)
- * 0: Transparent, 1: Outline/Dark, 2: Skin, 3: Hair, 4: Shirt, 5: Accents
+ * Pixel Art Data
  */
 const SPRITES = {
     yas: [
@@ -282,14 +299,34 @@ const SPRITES = {
         [0,3,4,4,4,3,0,0], // Hair flows down
         [0,3,4,4,4,3,0,0]
     ],
-    clapper: [
-        [0,0,0,0,0,0,0,0],
-        [0,1,1,1,0,1,1,0],
-        [0,1,0,1,0,1,0,1],
-        [0,1,1,1,1,1,1,1],
-        [0,1,1,1,1,1,1,1],
-        [0,1,0,1,1,0,1,1],
-        [0,1,1,1,1,1,1,1],
+    // 16x16 Big Clapperboard
+    clapperBig: [
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+        [0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0],
+        [0,1,2,2,2,1,2,2,1,2,2,1,2,2,1,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,0,0,1,2,2,2,1,2,2,2,1,0,0,0,0],
+        [0,0,0,0,1,2,2,1,2,2,1,0,0,0,0,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,1,1,0,0,0,0,1,1,0,0,0,0,1,1,0],
+        [0,1,1,0,1,1,1,0,0,1,1,1,0,1,1,0],
+        [0,1,1,0,1,1,0,0,0,0,1,1,0,1,1,0],
+        [0,1,1,0,1,1,1,1,1,1,1,1,0,1,1,0],
+        [0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+    ],
+    // Keyframe (Diamond shape)
+    keyframe: [
+        [0,0,0,1,0,0,0,0],
+        [0,0,1,5,1,0,0,0],
+        [0,1,5,5,5,1,0,0],
+        [1,5,5,5,5,5,1,0],
+        [0,1,5,5,5,1,0,0],
+        [0,0,1,5,1,0,0,0],
+        [0,0,0,1,0,0,0,0],
         [0,0,0,0,0,0,0,0]
     ],
     leaf: [
@@ -415,6 +452,7 @@ class Game {
     startGame() {
         document.getElementById('char-screen').classList.add('hidden');
         document.getElementById('score-display').classList.remove('hidden');
+        document.getElementById('end-screen').classList.add('hidden');
         this.state = 'PLAYING';
         
         // Reset Player
@@ -424,6 +462,7 @@ class Game {
         this.player.vy = 0;
         this.score = 0;
         this.cameraY = 0;
+        this.particles = [];
 
         // Generate Level
         this.platforms = [];
@@ -441,20 +480,54 @@ class Game {
                 const x = Math.random() * (this.width - w);
                 this.platforms.push({x, y, w, h: 4, type: 'platform'});
                 
-                // Chance for leaf
-                if(Math.random() > 0.7) {
-                    this.collectibles.push({x: x + w/2 - 4, y: y - 8, taken: false});
+                // Collectibles Logic
+                const rand = Math.random();
+                if(rand > 0.6) {
+                    // 15% chance for Keyframe (Double points), 25% chance for Leaf
+                    const type = rand > 0.85 ? 'keyframe' : 'leaf';
+                    this.collectibles.push({
+                        x: x + w/2 - 4, 
+                        y: y - 8, 
+                        startX: x + w/2 - 4, // for movement
+                        type: type, 
+                        taken: false,
+                        offset: Math.random() * 10
+                    });
                 }
             }
             y -= (30 + Math.random() * 20); // Gap
         }
 
         // Winning Platform
-        this.platforms.push({x: this.width/2 - 20, y: -this.winHeight - 20, w: 40, h: 4, type: 'finish'});
+        this.platforms.push({x: this.width/2 - 30, y: -this.winHeight - 20, w: 60, h: 4, type: 'finish'});
         this.winY = -this.winHeight - 20;
     }
 
+    spawnConfetti(x, y) {
+        const colors = [COLORS.FableYellow, COLORS.FuchsiaPink, COLORS.ForestTeal, COLORS.Mint];
+        for (let i = 0; i < 50; i++) {
+            this.particles.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 6,
+                vy: (Math.random() - 1) * 6,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                life: 100 + Math.random() * 50
+            });
+        }
+    }
+
     update() {
+        // Handle Particles even in WIN state
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            let p = this.particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.1; // Gravity
+            p.life--;
+            if (p.life <= 0) this.particles.splice(i, 1);
+        }
+
         if (this.state !== 'PLAYING') return;
 
         // Horizontal Movement
@@ -498,16 +571,23 @@ class Game {
             }
         }
 
-        // Collectibles
+        // Collectibles Logic
+        const time = Date.now() / 200;
         for(let c of this.collectibles) {
-            if(!c.taken && 
-               this.player.x < c.x + 8 &&
+            if(c.taken) continue;
+            
+            // Move keyframes
+            if (c.type === 'keyframe') {
+                c.x = c.startX + Math.sin(time + c.offset) * 5;
+            }
+
+            if(this.player.x < c.x + 8 &&
                this.player.x + this.player.width > c.x &&
                this.player.y < c.y + 8 &&
                this.player.y + this.player.height > c.y) {
                    c.taken = true;
-                   this.score += 10;
-                   // Sparkle effect could go here
+                   // 20 points for Keyframe, 10 for Leaf
+                   this.score += (c.type === 'keyframe' ? 20 : 10);
             }
         }
 
@@ -551,14 +631,21 @@ class Game {
         // Draw Collectibles
         for(let c of this.collectibles) {
             if(c.taken) continue;
-            this.drawPixelSprite(SPRITES.leaf, c.x, c.y, {1: COLORS.ForestTeal, 2: COLORS.Sage});
+            if (c.type === 'leaf') {
+                this.drawPixelSprite(SPRITES.leaf, c.x, c.y, {1: COLORS.ForestTeal, 2: COLORS.Sage});
+            } else if (c.type === 'keyframe') {
+                // Keyframe is Fable Yellow with Fuchsia accents
+                this.drawPixelSprite(SPRITES.keyframe, c.x, c.y, {1: COLORS.ForestTeal, 5: COLORS.FuchsiaPink});
+            }
         }
 
-        // Draw Win Object (Clapperboard)
-        this.drawPixelSprite(SPRITES.clapper, this.width/2 - 4, this.winY - 10, {1: '#000000'});
+        // Draw Win Object (Big Clapperboard)
+        // Draw 16x16 sprite centered on platform
+        // Platform is at this.winY. Object sits on top (-16px)
+        this.drawPixelSprite(SPRITES.clapperBig, this.width/2 - 8, this.winY - 16, {1: '#000', 2: '#FFF'}, 16);
 
         // Draw Player
-        if (this.state === 'PLAYING') {
+        if (this.state === 'PLAYING' || this.state === 'WIN') {
             const charData = CHARACTERS[this.selectedChar];
             this.ctx.save();
             this.ctx.translate(Math.floor(this.player.x), Math.floor(this.player.y));
@@ -570,24 +657,26 @@ class Game {
             this.ctx.restore();
         }
 
+        // Draw Particles
+        for (let p of this.particles) {
+            this.ctx.fillStyle = p.color;
+            this.ctx.fillRect(Math.floor(p.x), Math.floor(p.y), 2, 2);
+        }
+
         this.ctx.restore();
-        
-        // Vignette effect (UI layer simulation)
-        // this.ctx.fillStyle = 'rgba(22, 92, 104, 0.1)';
-        // this.ctx.fillRect(0,0,this.canvas.width, this.canvas.height);
     }
 
-    drawPixelSprite(grid, offsetX, offsetY, palette) {
-        for(let y=0; y<8; y++) {
-            for(let x=0; x<8; x++) {
+    // Adjusted to support variable sizes
+    drawPixelSprite(grid, offsetX, offsetY, palette, size = 8) {
+        for(let y=0; y<size; y++) {
+            for(let x=0; x<size; x++) {
                 const pixelVal = grid[y][x];
                 if(pixelVal !== 0 && palette[pixelVal]) {
                     this.ctx.fillStyle = palette[pixelVal];
-                    this.ctx.fillRect(offsetX + x, offsetY + y, 1, 1);
+                    this.ctx.fillRect(Math.floor(offsetX + x), Math.floor(offsetY + y), 1, 1);
                 } else if (pixelVal === 1 && !palette[1]) {
-                    // Default black outline if not specified
                     this.ctx.fillStyle = '#000';
-                    this.ctx.fillRect(offsetX + x, offsetY + y, 1, 1);
+                    this.ctx.fillRect(Math.floor(offsetX + x), Math.floor(offsetY + y), 1, 1);
                 }
             }
         }
@@ -621,8 +710,10 @@ class Game {
         const endScore = document.getElementById('end-score');
         
         if (win) {
-            endTitle.textContent = "YOU WON!";
+            endTitle.innerHTML = "<div class='win-text'>YOU DID IT!</div>";
             endTitle.style.color = COLORS.FableYellow;
+            this.spawnConfetti(this.player.x, this.player.y);
+            this.spawnConfetti(this.player.x, this.player.y - 40);
         } else {
             endTitle.textContent = "GAME OVER";
             endTitle.style.color = COLORS.FuchsiaPink;
